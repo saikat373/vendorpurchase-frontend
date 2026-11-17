@@ -1,11 +1,16 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState, type FormEvent } from "react";
 import {
   ALL_MENU_KEYS,
   ALL_MODULE_KEYS,
   ALL_VERTICALS,
   DEFAULT_INVENTORY_PERMISSIONS,
+  VENDOR_DEFAULT_INVENTORY_PERMISSIONS,
+  VENDOR_DEFAULT_MENU_KEYS,
+  VENDOR_DEFAULT_MODULE_KEYS,
+  VENDOR_DEFAULT_USER_PERMISSIONS,
+  hashPassword,
   type AdminUser,
   type InventoryRBACPermissions,
   type MenuPermissionKey,
@@ -18,6 +23,7 @@ type UserPermissionModuleProps = {
   currentUser: AdminUser;
   allUsers: AdminUser[];
   onUpdateUser: (updated: AdminUser) => void;
+  onCreateVendor: (newVendor: AdminUser) => void;
   onApproveUser: (email: string) => void;
   onNotify: (msg: string) => void;
 };
@@ -260,15 +266,131 @@ export function UserPermissionModule({
   currentUser,
   allUsers,
   onUpdateUser,
+  onCreateVendor,
   onApproveUser,
   onNotify,
 }: UserPermissionModuleProps) {
   const [selectedUserId, setSelectedUserId] = useState<string>(currentUser.id);
+  const [permissionPanelOpen, setPermissionPanelOpen] = useState<boolean>(false);
+  const permissionPanelRef = useRef<HTMLElement | null>(null);
+
+  // Create Vendor Form State (Admin-only)
+  const [createVendorOpen, setCreateVendorOpen] = useState(false);
+  const [vendorName, setVendorName] = useState("");
+  const [vendorEmail, setVendorEmail] = useState("");
+  const [vendorCompany, setVendorCompany] = useState("");
+  const [vendorRole, setVendorRole] = useState("Kirana Vendor");
+  const [vendorPassword, setVendorPassword] = useState("");
+  const [vendorVerticals, setVendorVerticals] = useState<VendorVerticalPermission[]>(["Grocery"]);
+  const [vendorIsActive, setVendorIsActive] = useState(true);
+  const [createVendorError, setCreateVendorError] = useState("");
+  const [creatingVendor, setCreatingVendor] = useState(false);
+
+  function openPermissionEditorForUser(userId: string) {
+    setSelectedUserId(userId);
+    setPermissionPanelOpen(true);
+    setPermPage(1);
+    requestAnimationFrame(() => {
+      permissionPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
+
+  function toggleNewVendorVertical(v: VendorVerticalPermission) {
+    setVendorVerticals((prev) => {
+      if (prev.includes(v)) {
+        return prev.length > 1 ? prev.filter((item) => item !== v) : prev;
+      }
+      return [...prev, v];
+    });
+  }
+
+  async function handleCreateVendorSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setCreateVendorError("");
+    const emailTrim = vendorEmail.trim().toLowerCase();
+    if (!vendorName.trim() || !emailTrim || !vendorCompany.trim()) {
+      setCreateVendorError("Vendor name, email, and company/store name are required.");
+      return;
+    }
+    if (vendorPassword.length < 6) {
+      setCreateVendorError("Password must be at least 6 characters.");
+      return;
+    }
+    if (allUsers.some((u) => u.email.toLowerCase() === emailTrim)) {
+      setCreateVendorError(`An account with email "${emailTrim}" already exists.`);
+      return;
+    }
+
+    setCreatingVendor(true);
+    try {
+      const passwordHash = await hashPassword(vendorPassword);
+      const newVendorId = `vendor-${Date.now()}`;
+      const newVendor: AdminUser = {
+        id: newVendorId,
+        accountType: "Vendor",
+        name: vendorName.trim(),
+        email: emailTrim,
+        company: vendorCompany.trim(),
+        role: vendorRole.trim() || "Vendor",
+        passwordHash,
+        approved: true,
+        isActive: vendorIsActive,
+        createdAt: new Date().toISOString(),
+        allowedVerticals: vendorVerticals,
+        allowedLocations: ["Main Store — Ground Floor"],
+        userPermissions: { ...VENDOR_DEFAULT_USER_PERMISSIONS },
+        inventoryPermissions: { ...VENDOR_DEFAULT_INVENTORY_PERMISSIONS },
+        menuPermissions: [...VENDOR_DEFAULT_MENU_KEYS],
+        modulePermissions: [...VENDOR_DEFAULT_MODULE_KEYS],
+      };
+      onCreateVendor(newVendor);
+      setCreateVendorOpen(false);
+      setVendorName("");
+      setVendorEmail("");
+      setVendorCompany("");
+      setVendorPassword("");
+      setVendorVerticals(["Grocery"]);
+      setVendorIsActive(true);
+      onNotify(
+        `Created ${vendorIsActive ? "Active" : "Inactive"} Vendor "${newVendor.name}" (${newVendor.email}). Select permissions below.`,
+      );
+      openPermissionEditorForUser(newVendorId);
+    } finally {
+      setCreatingVendor(false);
+    }
+  }
+
+  function toggleVendorActiveStatus(candidate: AdminUser) {
+    if (candidate.id === currentUser.id) {
+      onNotify("You cannot deactivate your own active Admin session.");
+      return;
+    }
+    const currentlyActive = candidate.isActive !== false;
+    const nextActive = !currentlyActive;
+    onUpdateUser({
+      ...candidate,
+      isActive: nextActive,
+    });
+    onNotify(
+      `${nextActive ? "Activated" : "Deactivated"} ${candidate.accountType ?? "Vendor"} account for ${candidate.name} (${candidate.email}). ${
+        nextActive ? "They can now log in." : "They can no longer log in."
+      }`,
+    );
+  }
 
   // User List Search, Filter & Pagination State
   const [userSearch, setUserSearch] = useState("");
   const [userFilter, setUserFilter] = useState<
-    "ALL" | "APPROVED" | "PENDING" | "Grocery" | "Pharmacy" | "Mall"
+    | "ALL"
+    | "ADMIN"
+    | "VENDOR"
+    | "ACTIVE"
+    | "INACTIVE"
+    | "APPROVED"
+    | "PENDING"
+    | "Grocery"
+    | "Pharmacy"
+    | "Mall"
   >("ALL");
   const [userPage, setUserPage] = useState(1);
   const [userPageSize, setUserPageSize] = useState(4);
@@ -419,6 +541,12 @@ export function UserPermissionModule({
     const q = userSearch.trim().toLowerCase();
     return allUsers.filter((candidate) => {
       const verts = candidate.allowedVerticals ?? ALL_VERTICALS;
+      const acctType = candidate.accountType ?? "Admin";
+      const isActive = candidate.isActive !== false;
+      if (userFilter === "ADMIN" && acctType !== "Admin") return false;
+      if (userFilter === "VENDOR" && acctType !== "Vendor") return false;
+      if (userFilter === "ACTIVE" && !isActive) return false;
+      if (userFilter === "INACTIVE" && isActive) return false;
       if (userFilter === "APPROVED" && !candidate.approved) return false;
       if (userFilter === "PENDING" && candidate.approved) return false;
       if (
@@ -625,11 +753,127 @@ export function UserPermissionModule({
       <article className="dashboard-card">
         <div className="card-heading">
           <div>
-            <p className="card-eyebrow">1. USER DIRECTORY & STORE VERTICAL ASSIGNMENTS (LIST VIEW)</p>
-            <h2>Select a user from the list to inspect or update their permissions</h2>
+            <p className="card-eyebrow">1. USER DIRECTORY &amp; VENDOR ACCOUNT MANAGEMENT</p>
+            <h2>Create Vendors, toggle Active/Inactive status, and edit permissions</h2>
           </div>
-          <span className="count-badge">{filteredUsers.length}</span>
+          <div className="header-actions">
+            {currentUser.accountType !== "Vendor" && (
+              <button
+                type="button"
+                className="approve-button"
+                onClick={() => setCreateVendorOpen((prev) => !prev)}
+              >
+                {createVendorOpen ? "✕ Close Vendor Form" : "＋ Create Vendor"}
+              </button>
+            )}
+            <span className="count-badge">{filteredUsers.length}</span>
+          </div>
         </div>
+
+        {/* Admin Create Vendor Form */}
+        {createVendorOpen && currentUser.accountType !== "Vendor" && (
+          <form className="universal-inventory-form" onSubmit={handleCreateVendorSubmit}>
+            <div className="universal-form-grid">
+              <label className="kirana-label">
+                Vendor Full Name *
+                <input
+                  required
+                  value={vendorName}
+                  onChange={(e) => setVendorName(e.target.value)}
+                  placeholder="e.g. Suresh Kirana Store"
+                />
+              </label>
+              <label className="kirana-label">
+                Vendor Login Email *
+                <input
+                  type="email"
+                  required
+                  value={vendorEmail}
+                  onChange={(e) => setVendorEmail(e.target.value)}
+                  placeholder="e.g. suresh.vendor@vendor.test"
+                />
+              </label>
+              <label className="kirana-label">
+                Company / Store Name *
+                <input
+                  required
+                  value={vendorCompany}
+                  onChange={(e) => setVendorCompany(e.target.value)}
+                  placeholder="e.g. Suresh Supermart"
+                />
+              </label>
+              <label className="kirana-label">
+                Vendor Role / Title
+                <input
+                  value={vendorRole}
+                  onChange={(e) => setVendorRole(e.target.value)}
+                  placeholder="e.g. Kirana Vendor"
+                />
+              </label>
+              <label className="kirana-label">
+                Login Password (min 6 chars) *
+                <input
+                  type="password"
+                  minLength={6}
+                  required
+                  value={vendorPassword}
+                  onChange={(e) => setVendorPassword(e.target.value)}
+                  placeholder="Set vendor password"
+                />
+              </label>
+              <label className="kirana-label">
+                Account Status
+                <select
+                  value={vendorIsActive ? "ACTIVE" : "INACTIVE"}
+                  onChange={(e) => setVendorIsActive(e.target.value === "ACTIVE")}
+                >
+                  <option value="ACTIVE">Active (Can Login)</option>
+                  <option value="INACTIVE">Inactive (Login Blocked)</option>
+                </select>
+              </label>
+
+              <div className="col-span-full">
+                <span className="kirana-label" style={{ marginBottom: "6px" }}>
+                  Permitted Store Verticals (at least 1):
+                </span>
+                <div className="header-actions">
+                  {ALL_VERTICALS.map((v) => {
+                    const checked = vendorVerticals.includes(v);
+                    return (
+                      <label key={v} className="list-switch-label">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleNewVendorVertical(v)}
+                        />
+                        <span>{v === "Mall" ? "Supermarket / Mall" : v}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {createVendorError && (
+                <p className="auth-status error col-span-full" role="alert">
+                  {createVendorError}
+                </p>
+              )}
+
+              <div className="col-span-full header-actions">
+                <button type="submit" className="approve-button" disabled={creatingVendor}>
+                  {creatingVendor ? "Creating Vendor…" : "✓ Create Vendor & Set Permissions"}
+                </button>
+                <button
+                  type="button"
+                  className="subtle-button"
+                  onClick={() => setCreateVendorOpen(false)}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </form>
+        )}
 
         {/* User List Search & Filter Bar */}
         <div className="list-toolbar">
@@ -655,6 +899,10 @@ export function UserPermissionModule({
               aria-label="Filter users"
             >
               <option value="ALL">All Users ({allUsers.length})</option>
+              <option value="VENDOR">🏪 Vendors Only</option>
+              <option value="ADMIN">🛡 Admins Only</option>
+              <option value="ACTIVE">✓ Active Only</option>
+              <option value="INACTIVE">⛔ Inactive Only</option>
               <option value="APPROVED">Approved Users</option>
               <option value="PENDING">Pending Approval</option>
               <option value="Pharmacy">💊 Pharmacy Permitted</option>
@@ -702,7 +950,7 @@ export function UserPermissionModule({
                 </tr>
               ) : (
                 paginatedUsers.map((candidate) => {
-                  const isSelected = candidate.id === targetUser.id;
+                  const isSelected = permissionPanelOpen && candidate.id === targetUser.id;
                   const isCurrent = candidate.id === currentUser.id;
                   const verts = candidate.allowedVerticals ?? ALL_VERTICALS;
                   const uAct = candidate.userPermissions ?? {
@@ -719,7 +967,7 @@ export function UserPermissionModule({
                     <tr
                       key={candidate.id}
                       className={isSelected ? "selected-list-row" : ""}
-                      onClick={() => setSelectedUserId(candidate.id)}
+                      onClick={() => openPermissionEditorForUser(candidate.id)}
                     >
                       <td>
                         <div className="user-cell-inline">
@@ -734,8 +982,17 @@ export function UserPermissionModule({
                         </div>
                       </td>
                       <td>
-                        <strong>{candidate.role || "Operations Admin"}</strong>
-                        <small>{candidate.company}</small>
+                        <div className="status-cell-stack">
+                          <span
+                            className={`account-role-pill ${
+                              candidate.accountType === "Vendor" ? "vendor" : "admin"
+                            }`}
+                          >
+                            {candidate.accountType === "Vendor" ? "🏪 Vendor" : "🛡 Admin"}
+                          </span>
+                          <strong>{candidate.role || "Operations Admin"}</strong>
+                          <small>{candidate.company}</small>
+                        </div>
                       </td>
                       <td>
                         <div className="user-roster-badges">
@@ -759,21 +1016,39 @@ export function UserPermissionModule({
                         </small>
                       </td>
                       <td>
-                        {candidate.approved ? (
-                          <span className="pill ready">Approved</span>
-                        ) : (
-                          <span className="pill waiting">Pending</span>
-                        )}
+                        <div className="status-cell-stack">
+                          {candidate.isActive === false ? (
+                            <span className="pill alert-month">Inactive</span>
+                          ) : (
+                            <span className="pill ready">Active</span>
+                          )}
+                          {!candidate.approved && <span className="pill waiting">Pending</span>}
+                        </div>
                       </td>
                       <td onClick={(e) => e.stopPropagation()}>
                         <div className="table-action-stack">
                           <button
                             type="button"
                             className={isSelected ? "approve-button" : "subtle-button"}
-                            onClick={() => setSelectedUserId(candidate.id)}
+                            onClick={() => {
+                              if (isSelected) {
+                                setPermissionPanelOpen(false);
+                              } else {
+                                openPermissionEditorForUser(candidate.id);
+                              }
+                            }}
                           >
-                            {isSelected ? "✓ Editing Below" : "Edit Permissions"}
+                            {isSelected ? "✕ Close Editor" : "Edit Permissions"}
                           </button>
+                          {!isCurrent && (
+                            <button
+                              type="button"
+                              className="subtle-button"
+                              onClick={() => toggleVendorActiveStatus(candidate)}
+                            >
+                              {candidate.isActive === false ? "✓ Activate" : "⛔ Deactivate"}
+                            </button>
+                          )}
                           {!candidate.approved && (
                             <button
                               type="button"
@@ -832,12 +1107,14 @@ export function UserPermissionModule({
         </div>
       </article>
 
-      {/* SECTION 2: SEARCHABLE & PAGINATED PERMISSION LIST (USER, MENU & MODULE PERMISSIONS) */}
-      <article className="dashboard-card">
+      {/* SECTION 2: PERMISSION EDITOR BLOCK FOR THE SELECTED USER (OPENS ON "EDIT PERMISSIONS") */}
+      {permissionPanelOpen && (
+      <article ref={permissionPanelRef} className="dashboard-card permission-editor-block">
         <div className="card-heading">
           <div>
             <p className="card-eyebrow">
-              2. PERMISSION MATRIX LIST FOR: {targetUser.name.toUpperCase()} ({targetUser.email})
+              2. PERMISSION MATRIX LIST FOR: {targetUser.name.toUpperCase()} ({targetUser.email}) ·{" "}
+              {targetUser.accountType === "Vendor" ? "VENDOR" : "ADMIN"}
             </p>
             <h2>
               Searchable & paginated list of User Permissions, Menu Permissions & Module Permissions
@@ -845,7 +1122,14 @@ export function UserPermissionModule({
           </div>
           <div className="header-actions">
             <button type="button" className="subtle-button" onClick={grantAllPermissions}>
-              ✓ Grant All 25 Permissions to {targetUser.name.split(" ")[0]}
+              ✓ Grant All {allPermissionRows.length} Permissions to {targetUser.name.split(" ")[0]}
+            </button>
+            <button
+              type="button"
+              className="subtle-button"
+              onClick={() => setPermissionPanelOpen(false)}
+            >
+              ✕ Close
             </button>
           </div>
         </div>
@@ -1051,6 +1335,7 @@ export function UserPermissionModule({
           </div>
         </div>
       </article>
+      )}
     </div>
   );
 }

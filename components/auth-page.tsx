@@ -3,13 +3,21 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
+  DUMMY_ADMIN_CREDENTIALS,
+  DUMMY_VENDOR_CREDENTIALS,
+  VENDOR_DEFAULT_INVENTORY_PERMISSIONS,
+  VENDOR_DEFAULT_MENU_KEYS,
+  VENDOR_DEFAULT_MODULE_KEYS,
+  VENDOR_DEFAULT_USER_PERMISSIONS,
+  ensureSeededCredentialUsers,
   hashPassword,
   readUsers,
   saveSession,
   saveUsers,
   type AdminUser,
+  type UserAccountType,
 } from "@/lib/auth-storage";
-import { APP_ROUTES } from "@/lib/routes";
+import { APP_ROUTES, MENU_KEY_TO_PATH } from "@/lib/routes";
 
 type AuthPageProps = {
   mode: "login" | "signup";
@@ -103,6 +111,7 @@ function EyeIcon({ open }: { open: boolean }) {
 export function AuthPage({ mode }: AuthPageProps) {
   const navigate = useNavigate();
   const isSignup = mode === "signup";
+  const [accountType, setAccountType] = useState<UserAccountType>("Admin");
   const [values, setValues] = useState({
     name: "",
     email: "",
@@ -121,8 +130,23 @@ export function AuthPage({ mode }: AuthPageProps) {
   const [submittedRequest, setSubmittedRequest] = useState<SubmittedRequest | null>(null);
 
   useEffect(() => {
-    queueMicrotask(() => setCaptcha(makeCaptcha()));
+    queueMicrotask(() => {
+      setCaptcha(makeCaptcha());
+      void ensureSeededCredentialUsers();
+    });
   }, []);
+
+  function fillDummyCredential(email: string, password: string, type: UserAccountType) {
+    setAccountType(type);
+    setValues((current) => ({
+      ...current,
+      email,
+      password,
+    }));
+    setCaptchaAnswer(String(captcha.answer));
+    setIsError(false);
+    setStatus(`Filled ${type} test credentials (${email}). Click "Sign in to dashboard" to continue.`);
+  }
 
   function update(field: keyof typeof values, value: string) {
     setValues((current) => ({ ...current, [field]: value }));
@@ -212,7 +236,7 @@ export function AuthPage({ mode }: AuthPageProps) {
 
     setIsSubmitting(true);
     try {
-      const users = readUsers();
+      const users = await ensureSeededCredentialUsers();
       let existing = users.find(
         (user) => user.email.toLowerCase() === values.email.trim().toLowerCase(),
       );
@@ -228,15 +252,27 @@ export function AuthPage({ mode }: AuthPageProps) {
           return;
         }
 
+        const isNewVendor = accountType === "Vendor";
         const newUser: AdminUser = {
           id: crypto.randomUUID(),
+          accountType,
           name: values.name.trim(),
           email: values.email.trim(),
           company: values.company.trim(),
-          role: values.role,
+          role: isNewVendor ? `Vendor (${values.role})` : values.role,
           passwordHash: await hashPassword(values.password),
           approved: false,
           createdAt: new Date().toISOString(),
+          ...(isNewVendor
+            ? {
+                allowedVerticals: ["Grocery"],
+                allowedLocations: ["Main Store — Ground Floor"],
+                userPermissions: { ...VENDOR_DEFAULT_USER_PERMISSIONS },
+                inventoryPermissions: { ...VENDOR_DEFAULT_INVENTORY_PERMISSIONS },
+                menuPermissions: [...VENDOR_DEFAULT_MENU_KEYS],
+                modulePermissions: [...VENDOR_DEFAULT_MODULE_KEYS],
+              }
+            : {}),
         };
         saveUsers([...users, newUser]);
         setSubmittedRequest({
@@ -246,7 +282,11 @@ export function AuthPage({ mode }: AuthPageProps) {
           role: newUser.role || ROLE_OPTIONS[0],
           approved: false,
         });
-        setStatus("Request received. An administrator must approve your account before you can sign in.");
+        setStatus(
+          isNewVendor
+            ? "Vendor request received. An Admin must approve your account and assign permissions before you can sign in."
+            : "Request received. An administrator must approve your account before you can sign in.",
+        );
         setValues({
           name: "",
           email: "",
@@ -266,6 +306,7 @@ export function AuthPage({ mode }: AuthPageProps) {
       ) {
         existing = {
           id: "vendorpurchase-demo-admin",
+          accountType: "Admin",
           name: "Demo Admin",
           email: DEMO_EMAIL,
           company: "VendorPurchase Demo",
@@ -289,6 +330,22 @@ export function AuthPage({ mode }: AuthPageProps) {
         setStatus("Your account is awaiting administrator approval.");
         return;
       }
+      if (existing.isActive === false) {
+        setIsError(true);
+        setStatus(
+          "Your account is currently inactive. Please contact an Administrator to activate your account.",
+        );
+        return;
+      }
+
+      const resolvedType: UserAccountType = existing.accountType ?? "Admin";
+      if (resolvedType !== accountType) {
+        setIsError(true);
+        setStatus(
+          `This account is registered as a ${resolvedType}. Please switch to "${resolvedType} Login" above.`,
+        );
+        return;
+      }
 
       saveSession(existing);
       setValues({
@@ -301,7 +358,15 @@ export function AuthPage({ mode }: AuthPageProps) {
       });
       setCaptchaAnswer("");
       setCaptcha(makeCaptcha());
-      navigate(APP_ROUTES.INVENTORY_DASHBOARD);
+
+      const permittedMenus = existing.menuPermissions ?? [];
+      if (permittedMenus.includes("inventory")) {
+        navigate(APP_ROUTES.INVENTORY_DASHBOARD);
+      } else if (permittedMenus.length > 0) {
+        navigate(MENU_KEY_TO_PATH[permittedMenus[0]]);
+      } else {
+        navigate(APP_ROUTES.OVERVIEW);
+      }
     } catch {
       setIsError(true);
       setStatus("We couldn’t complete that request. Please try again.");
@@ -316,25 +381,53 @@ export function AuthPage({ mode }: AuthPageProps) {
         <section className="auth-panel" aria-labelledby="auth-title">
           <Brand />
           <div className="auth-content">
-            <p className="auth-eyebrow">{isSignup ? "GET STARTED" : "ADMIN PORTAL"}</p>
+            <p className="auth-eyebrow">
+              {isSignup
+                ? `GET STARTED · ${accountType.toUpperCase()} ACCOUNT`
+                : `${accountType.toUpperCase()} LOGIN PORTAL`}
+            </p>
             <h1 id="auth-title">
               {isSignup
                 ? submittedRequest
                   ? "Access request submitted"
-                  : "Create your account"
-                : "Log in to your account"}
+                  : `Create ${accountType} account`
+                : `${accountType} Login`}
             </h1>
             <p className="auth-subtitle">
               {isSignup
                 ? submittedRequest
                   ? "Your credentials are encrypted and queued for administrator review."
-                  : "Request access to your vendor operations workspace."
-                : "Welcome back. Sign in to manage vendor operations."}
+                  : accountType === "Vendor"
+                    ? "Register as a Vendor. Admin will approve & assign your permissions."
+                    : "Request Administrator access to manage vendors & permissions."
+                : accountType === "Admin"
+                  ? "Admins have full permissions and manage Vendor access."
+                  : "Vendors access only modules & verticals granted by Admin."}
             </p>
 
-            <div className="auth-route-switch" aria-label="Account options">
-              <Link to={APP_ROUTES.LOGIN} aria-current={!isSignup ? "page" : undefined} className={!isSignup ? "active" : ""}>Log in</Link>
-              <Link to={APP_ROUTES.SIGNUP} aria-current={isSignup ? "page" : undefined} className={isSignup ? "active" : ""}>Sign up</Link>
+            <div className="auth-user-type-switch" role="group" aria-label="Select user type">
+              <button
+                type="button"
+                className={accountType === "Admin" ? "active" : ""}
+                onClick={() => {
+                  setAccountType("Admin");
+                  setIsError(false);
+                  setStatus("");
+                }}
+              >
+                🛡 Admin Login
+              </button>
+              <button
+                type="button"
+                className={accountType === "Vendor" ? "active" : ""}
+                onClick={() => {
+                  setAccountType("Vendor");
+                  setIsError(false);
+                  setStatus("");
+                }}
+              >
+                🏪 Vendor Login
+              </button>
             </div>
 
             {isSignup && submittedRequest ? (
@@ -591,17 +684,43 @@ export function AuthPage({ mode }: AuthPageProps) {
                 <p className={`auth-status${isError ? " error" : ""}`} role="status" aria-live="polite">
                   {status}
                 </p>
-                <p className="auth-footer">
-                  {isSignup ? "Already have an account?" : "Don’t have an account?"}{" "}
-                  <Link to={isSignup ? APP_ROUTES.LOGIN : APP_ROUTES.SIGNUP}>{isSignup ? "Log in" : "Sign up"}</Link>
-                </p>
                 <p className="auth-privacy">
-                  {isSignup ? (
-                    "No OAuth sign-in. Credentials are SHA-256 hashed & require admin approval."
-                  ) : (
-                    <>Demo login: <strong>{DEMO_EMAIL}</strong> / <strong>{DEMO_PASSWORD}</strong></>
-                  )}
+                  {accountType === "Vendor"
+                    ? "Vendor accounts are created & activated by an Administrator."
+                    : <>Demo Admin: <strong>{DEMO_EMAIL}</strong> / <strong>{DEMO_PASSWORD}</strong></>}
                 </p>
+
+                {!isSignup && (
+                  <div className="dummy-creds-box" aria-label="Dummy test credentials from JSON">
+                    <div className="dummy-creds-header">
+                      <span>Test Credentials (data/dummy-credentials.json)</span>
+                      <small>Click to auto-fill</small>
+                    </div>
+                    <div className="dummy-creds-list">
+                      {(accountType === "Admin"
+                        ? DUMMY_ADMIN_CREDENTIALS
+                        : DUMMY_VENDOR_CREDENTIALS
+                      ).map((cred) => (
+                        <button
+                          key={cred.id}
+                          type="button"
+                          className="dummy-cred-chip"
+                          onClick={() =>
+                            fillDummyCredential(cred.email, cred.password, cred.accountType)
+                          }
+                        >
+                          <div>
+                            <strong>{cred.name}</strong>
+                            <small>
+                              {cred.email} · <code>{cred.password}</code>
+                            </small>
+                          </div>
+                          <span>Fill →</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </>
             )}
           </div>

@@ -8,6 +8,7 @@ import {
   ALL_VERTICALS,
   DEFAULT_INVENTORY_PERMISSIONS,
   clearSession,
+  ensureSeededCredentialUsers,
   normalizeUserPermissions,
   readSession,
   readUsers,
@@ -354,24 +355,27 @@ export function DashboardPage() {
   const [newRtvAmount, setNewRtvAmount] = useState("320");
 
   useEffect(() => {
-    queueMicrotask(() => {
+    void (async () => {
       try {
         const session = readSession();
         if (!session) {
           navigate(APP_ROUTES.LOGIN, { replace: true });
           return;
         }
-        let storedUsers = readUsers();
+        let storedUsers = await ensureSeededCredentialUsers();
         // Ensure seeded staff accounts exist so the User Module has Pharmacy & Supermarket profiles
         const existingIds = new Set(storedUsers.map((u) => u.id));
         const missingSeeds = SEED_STAFF_USERS.filter((s) => !existingIds.has(s.id));
         if (missingSeeds.length > 0) {
-          storedUsers = [...storedUsers, ...missingSeeds.map((s) => normalizeUserPermissions(s))];
+          storedUsers = [
+            ...storedUsers,
+            ...missingSeeds.map((s) => normalizeUserPermissions({ ...s, accountType: "Vendor" })),
+          ];
           saveUsers(storedUsers);
         }
 
         const current = storedUsers.find((item) => item.id === session.id);
-        if (!current?.approved) {
+        if (!current?.approved || current.isActive === false) {
           clearSession();
           navigate(APP_ROUTES.LOGIN, { replace: true });
           return;
@@ -401,7 +405,7 @@ export function DashboardPage() {
         clearSession();
         navigate(APP_ROUTES.LOGIN, { replace: true });
       }
-    });
+    })();
   }, [navigate]);
 
   // Derived User Permission Helpers
@@ -476,6 +480,17 @@ export function DashboardPage() {
         );
       }
     }
+  }
+
+  function handleCreateVendor(newVendor: AdminUser) {
+    const normalized = normalizeUserPermissions({
+      ...newVendor,
+      accountType: "Vendor",
+    });
+    const nextUsers = [normalized, ...allUsers];
+    saveUsers(nextUsers);
+    setAllUsers(nextUsers);
+    setPendingUsers(nextUsers.filter((u) => !u.approved));
   }
 
   function updateInventoryAndPersist(updater: (prev: LooseInventoryItem[]) => LooseInventoryItem[]) {
@@ -1360,6 +1375,9 @@ export function DashboardPage() {
                     {user.name.slice(0, 1).toUpperCase()}
                   </span>
                   <span className="navbar-user-name">{user.name}</span>
+                  <span className={`account-role-pill ${user.accountType === "Admin" ? "admin" : "vendor"}`}>
+                    {user.accountType === "Admin" ? "Admin" : "Vendor"}
+                  </span>
                   <span className="navbar-caret" aria-hidden="true">
                     {userMenuOpen ? "▴" : "▾"}
                   </span>
@@ -1372,7 +1390,9 @@ export function DashboardPage() {
                     aria-label="User actions menu"
                   >
                     <div className="navbar-dropdown-header">
-                      <strong>{user.name}</strong>
+                      <strong>
+                        {user.name} ({user.accountType ?? "Admin"})
+                      </strong>
                       <small>
                         {user.role || "Operations Admin"} · {user.email}
                       </small>
@@ -1392,17 +1412,19 @@ export function DashboardPage() {
                       </button>
                     )}
 
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className="navbar-dropdown-item"
-                      onClick={() => {
-                        setUserMenuOpen(false);
-                        setActiveTab("user-permissions");
-                      }}
-                    >
-                      <span>🔐</span> Permissions ({permittedVerticals.length} Verticals)
-                    </button>
+                    {permittedMenus.includes("user-permissions") && (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="navbar-dropdown-item"
+                        onClick={() => {
+                          setUserMenuOpen(false);
+                          setActiveTab("user-permissions");
+                        }}
+                      >
+                        <span>🔐</span> Permissions ({permittedVerticals.length} Verticals)
+                      </button>
+                    )}
 
                     <button
                       type="button"
@@ -1607,7 +1629,37 @@ export function DashboardPage() {
             )}
 
           {/* MODULE: DEDICATED INVENTORY MANAGEMENT MODULE (Kirana, Pharmacy, Mall) */}
-          {activeTab === "inventory" && (
+          {!permittedMenus.includes(activeTab) ? (
+            <article className="dashboard-card" role="alert">
+              <div className="card-heading">
+                <div>
+                  <p className="card-eyebrow">ACCESS RESTRICTED BY ADMIN</p>
+                  <h2>You do not have permission to access this module</h2>
+                </div>
+                <span className="pill alert-month">
+                  {user.accountType === "Vendor" ? "Vendor Scope Restricted" : "Restricted"}
+                </span>
+              </div>
+              <p className="dashboard-subtitle">
+                Your {user.accountType ?? "Vendor"} account ({user.email}) has not been granted
+                permission for <strong>{activeTab}</strong>. Ask an Administrator to enable this
+                menu in User &amp; Permission Management.
+              </p>
+              {permittedMenus.length > 0 && (
+                <div className="header-actions" style={{ marginTop: "14px" }}>
+                  <button
+                    type="button"
+                    className="approve-button"
+                    onClick={() => setActiveTab(permittedMenus[0])}
+                  >
+                    Go to Permitted Workspace ({permittedMenus[0]})
+                  </button>
+                </div>
+              )}
+            </article>
+          ) : null}
+
+          {permittedMenus.includes(activeTab) && activeTab === "inventory" && (
             <InventoryModule
               currentUser={user}
               subRoute={inventorySubRoute}
@@ -1617,18 +1669,19 @@ export function DashboardPage() {
           )}
 
           {/* MODULE: SEPARATED USER & PERMISSION MODULE */}
-          {activeTab === "user-permissions" && (
+          {permittedMenus.includes(activeTab) && activeTab === "user-permissions" && (
             <UserPermissionModule
               currentUser={user}
               allUsers={allUsers}
               onUpdateUser={handleUpdateUserPermissions}
+              onCreateVendor={handleCreateVendor}
               onApproveUser={approve}
               onNotify={notify}
             />
           )}
 
           {/* MODULE 0: OWNER PULSE OVERVIEW & ADMIN APPROVALS */}
-          {activeTab === "overview" && (
+          {permittedMenus.includes(activeTab) && activeTab === "overview" && (
             <div className="kirana-section-stack">
               <div className="kirana-module-pills" aria-label="Quick module jump">
                 <button type="button" onClick={() => openInventoryRoute("dashboard")}>
@@ -1933,7 +1986,7 @@ export function DashboardPage() {
           )}
 
           {/* MODULE: UNIVERSAL ADD-INVENTORY & DORMANCY ALERT HUB */}
-          {activeTab === "inventory-hub" && (
+          {permittedMenus.includes(activeTab) && activeTab === "inventory-hub" && (
             <div className="kirana-section-stack">
               {/* Dormancy Notification Banner */}
               <article className="dashboard-card dormancy-banner-card">
@@ -2381,7 +2434,7 @@ export function DashboardPage() {
           )}
 
           {/* MODULE 1: STORE-FLOOR POS (ADAPTS FOR GROCERY, PHARMACY & SUPERMARKET) */}
-          {activeTab === "store-floor" && (
+          {permittedMenus.includes(activeTab) && activeTab === "store-floor" && (
             <div className="kirana-section-stack">
               <section className="dashboard-content-grid">
                 {hasModule("posBilling") ? (
@@ -2816,7 +2869,7 @@ export function DashboardPage() {
           )}
 
           {/* MODULE 2: PROFIT PROTECTION & ANTI-THEFT CONTROLS */}
-          {activeTab === "profit-guard" && (
+          {permittedMenus.includes(activeTab) && activeTab === "profit-guard" && (
             <div className="kirana-section-stack">
               {hasModule("marginDrift") && (
                 <article className="dashboard-card">
@@ -3021,7 +3074,7 @@ export function DashboardPage() {
           )}
 
           {/* MODULE 3: SUPPLIER & CREDIT (UDHAAR) MANAGEMENT */}
-          {activeTab === "suppliers-khata" && (
+          {permittedMenus.includes(activeTab) && activeTab === "suppliers-khata" && (
             <div className="kirana-section-stack">
               {hasModule("autoPo") && (
                 <article className="dashboard-card">
@@ -3201,7 +3254,7 @@ export function DashboardPage() {
           )}
 
           {/* MODULE 4: CUSTOMER RETENTION & HYPERLOCAL GROWTH */}
-          {activeTab === "retention" && (
+          {permittedMenus.includes(activeTab) && activeTab === "retention" && (
             <div className="kirana-section-stack">
               {hasModule("whatsappAi") && (
                 <article className="dashboard-card">
@@ -3356,7 +3409,7 @@ export function DashboardPage() {
           )}
 
           {/* MODULE 5: COMPLIANCE & OWNER VISIBILITY (GST) */}
-          {activeTab === "gst-pulse" && (
+          {permittedMenus.includes(activeTab) && activeTab === "gst-pulse" && (
             <div className="kirana-section-stack">
               <article className="dashboard-card">
                 <div className="card-heading">

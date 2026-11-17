@@ -90,6 +90,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .auth-panel {
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
   padding: 38px clamp(32px, 5vw, 72px);
   background: #fff;
 }
@@ -233,10 +235,10 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
     url("/auth-background.svg") center / cover no-repeat;
 }
 .login-frame {
-  width: min(920px, 100%);
-  height: min(580px, calc(100svh - 48px));
+  width: min(960px, 100%);
+  height: min(690px, calc(100svh - 36px));
   min-height: 0;
-  grid-template-columns: minmax(0, .96fr) minmax(0, 1.04fr);
+  grid-template-columns: minmax(0, .98fr) minmax(0, 1.02fr);
   border-radius: 24px;
   box-shadow: 0 24px 64px rgba(27, 35, 48, .16), 0 2px 8px rgba(27, 35, 48, .06);
 }
@@ -1430,6 +1432,131 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .login-frame .auth-status { min-height: 0; margin-top: 4px; }
   .login-frame .auth-footer { margin-top: 5px; }
   .login-frame .auth-privacy { margin-top: 6px; font-size: 8px; }
+}
+
+.account-role-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  min-height: 20px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: .03em;
+  white-space: nowrap;
+}
+.account-role-pill.admin {
+  border: 1px solid #f4c7c6;
+  background: #fff2f1;
+  color: #c92624;
+}
+.account-role-pill.vendor {
+  border: 1px solid #c6dafc;
+  background: #eef5ff;
+  color: #1f5bb5;
+}
+.auth-user-type-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 10px;
+  padding: 4px;
+  border: 1px solid #e6e8ee;
+  border-radius: 10px;
+  background: #f6f8fb;
+}
+.auth-user-type-switch button {
+  min-height: 33px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #5b6370;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  transition: background .16s ease, color .16s ease, box-shadow .16s ease;
+}
+.auth-user-type-switch button.active {
+  background: #ffffff;
+  color: #d92a29;
+  box-shadow: 0 2px 6px rgba(20, 28, 42, .08);
+}
+.dummy-creds-box {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #e6e9ef;
+  border-radius: 11px;
+  background: #f9fafc;
+}
+.dummy-creds-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+.dummy-creds-header span {
+  color: #2c3442;
+  font-size: 9.5px;
+  font-weight: 750;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.dummy-creds-header small {
+  color: #7d8593;
+  font-size: 9px;
+}
+.dummy-creds-list {
+  display: grid;
+  gap: 5px;
+}
+.dummy-cred-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid #e2e6ee;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #202734;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color .15s ease, background .15s ease, transform .15s ease;
+}
+.dummy-cred-chip:hover {
+  border-color: #d92a29;
+  background: #fff6f5;
+  transform: translateY(-1px);
+}
+.dummy-cred-chip strong {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 700;
+}
+.dummy-cred-chip small {
+  display: block;
+  margin-top: 1px;
+  color: #67707e;
+  font-size: 9.5px;
+}
+.dummy-cred-chip code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: #f2f4f8;
+  color: #c92624;
+  font-size: 9px;
+  font-weight: 700;
+}
+.dummy-cred-chip > span {
+  color: #d92a29;
+  font-size: 10px;
+  font-weight: 750;
+  white-space: nowrap;
 }
 
 @media (prefers-reduced-motion: reduce) {

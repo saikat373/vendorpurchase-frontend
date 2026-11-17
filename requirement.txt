@@ -296,6 +296,15 @@ Use reusable components and consistent design tokens.
 Do not unnecessarily rewrite existing application modules.
 
 
+We have two type of User
+1. Admin
+2. Vendor
+Create an admin login
+Admin have all the permission by default and admin will give permission to vendor
+and vendor can access application accordingly
+
+create a dummy credential to test using json file
+
 
 
 

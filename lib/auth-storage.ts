@@ -1,3 +1,7 @@
+import dummyCredentials from "@/data/dummy-credentials.json";
+
+export type UserAccountType = "Admin" | "Vendor";
+
 export type VendorVerticalPermission = "Grocery" | "Pharmacy" | "Mall";
 
 export type MenuPermissionKey =
@@ -43,12 +47,14 @@ export type UserActionPermissions = {
 
 export type AdminUser = {
   id: string;
+  accountType?: UserAccountType;
   name: string;
   email: string;
   company: string;
   role?: string;
   passwordHash: string;
   approved: boolean;
+  isActive?: boolean;
   createdAt: string;
   allowedVerticals?: VendorVerticalPermission[];
   allowedLocations?: string[];
@@ -112,9 +118,52 @@ export const DEFAULT_INVENTORY_PERMISSIONS: InventoryRBACPermissions = {
   viewReports: true,
 };
 
+export const VENDOR_DEFAULT_USER_PERMISSIONS: UserActionPermissions = {
+  canAddInventory: false,
+  canNotifyVendors: false,
+  canOverridePrice: false,
+  canApproveUsers: false,
+};
+
+export const VENDOR_DEFAULT_INVENTORY_PERMISSIONS: InventoryRBACPermissions = {
+  viewInventory: true,
+  addInventory: false,
+  editInventory: false,
+  viewStock: true,
+  adjustStock: false,
+  exportInventory: false,
+  viewStockHistory: false,
+  viewReports: false,
+};
+
+export const VENDOR_DEFAULT_MENU_KEYS: MenuPermissionKey[] = ["overview", "inventory"];
+
+export const VENDOR_DEFAULT_MODULE_KEYS: ModulePermissionKey[] = [];
+
+export type DummyCredentialSeed = {
+  id: string;
+  accountType: UserAccountType;
+  name: string;
+  email: string;
+  password: string;
+  company: string;
+  role: string;
+  approved: boolean;
+  allowedVerticals: VendorVerticalPermission[];
+  allowedLocations: string[];
+  userPermissions: UserActionPermissions;
+  inventoryPermissions: InventoryRBACPermissions;
+  menuPermissions: MenuPermissionKey[];
+  modulePermissions: ModulePermissionKey[];
+};
+
+export const DUMMY_ADMIN_CREDENTIALS = dummyCredentials.admin as DummyCredentialSeed[];
+export const DUMMY_VENDOR_CREDENTIALS = dummyCredentials.vendors as DummyCredentialSeed[];
+
 export function normalizeUserPermissions(user: AdminUser): Required<
   Pick<
     AdminUser,
+    | "accountType"
     | "allowedVerticals"
     | "allowedLocations"
     | "userPermissions"
@@ -124,45 +173,66 @@ export function normalizeUserPermissions(user: AdminUser): Required<
   >
 > &
   AdminUser {
-  const baseMenus =
-    user.menuPermissions && user.menuPermissions.length > 0
-      ? [...user.menuPermissions]
-      : [...ALL_MENU_KEYS];
+  const accountType: UserAccountType =
+    user.accountType ??
+    (user.role?.toLowerCase().includes("vendor") ||
+    user.id.startsWith("vendor-") ||
+    user.id.startsWith("staff-")
+      ? "Vendor"
+      : "Admin");
 
-  // Ensure users who had inventory-hub or overview also get the Inventory menu unless explicitly configured
+  const isAdmin = accountType === "Admin";
+
+  const baseMenus = user.menuPermissions
+    ? [...user.menuPermissions]
+    : isAdmin
+      ? [...ALL_MENU_KEYS]
+      : [...VENDOR_DEFAULT_MENU_KEYS];
+
+  // Ensure users who had inventory-hub also get the Inventory menu unless explicitly configured
   if (!baseMenus.includes("inventory") && baseMenus.includes("inventory-hub")) {
     baseMenus.push("inventory");
   }
 
-  const userPerms = user.userPermissions ?? { ...DEFAULT_USER_PERMISSIONS };
-  const invPerms: InventoryRBACPermissions = user.inventoryPermissions ?? {
-    viewInventory: true,
-    addInventory: userPerms.canAddInventory,
-    editInventory: userPerms.canAddInventory,
-    viewStock: true,
-    adjustStock: userPerms.canAddInventory,
-    exportInventory: true,
-    viewStockHistory: true,
-    viewReports: true,
-  };
+  const userPerms: UserActionPermissions = user.userPermissions
+    ? { ...user.userPermissions }
+    : isAdmin
+      ? { ...DEFAULT_USER_PERMISSIONS }
+      : { ...VENDOR_DEFAULT_USER_PERMISSIONS };
+
+  const invPerms: InventoryRBACPermissions = user.inventoryPermissions
+    ? { ...user.inventoryPermissions }
+    : isAdmin
+      ? { ...DEFAULT_INVENTORY_PERMISSIONS }
+      : {
+          ...VENDOR_DEFAULT_INVENTORY_PERMISSIONS,
+          addInventory: userPerms.canAddInventory,
+        };
 
   return {
     ...user,
+    accountType,
+    isActive: user.isActive ?? true,
     allowedVerticals:
       user.allowedVerticals && user.allowedVerticals.length > 0
         ? user.allowedVerticals
-        : [...ALL_VERTICALS],
+        : isAdmin
+          ? [...ALL_VERTICALS]
+          : ["Grocery"],
     allowedLocations:
       user.allowedLocations && user.allowedLocations.length > 0
         ? user.allowedLocations
-        : ["ALL"],
+        : isAdmin
+          ? ["ALL"]
+          : ["Main Store — Ground Floor"],
     userPermissions: userPerms,
     inventoryPermissions: invPerms,
     menuPermissions: baseMenus,
-    modulePermissions:
-      user.modulePermissions && user.modulePermissions.length > 0
-        ? user.modulePermissions
-        : [...ALL_MODULE_KEYS],
+    modulePermissions: user.modulePermissions
+      ? [...user.modulePermissions]
+      : isAdmin
+        ? [...ALL_MODULE_KEYS]
+        : [...VENDOR_DEFAULT_MODULE_KEYS],
   };
 }
 
@@ -207,4 +277,47 @@ export async function hashPassword(password: string) {
   return Array.from(new Uint8Array(result))
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
+}
+
+export async function ensureSeededCredentialUsers(): Promise<AdminUser[]> {
+  const existingUsers = readUsers();
+  const existingByEmail = new Map(
+    existingUsers.map((u) => [u.email.toLowerCase(), u]),
+  );
+
+  const allSeeds = [...DUMMY_ADMIN_CREDENTIALS, ...DUMMY_VENDOR_CREDENTIALS];
+  let changed = false;
+  const nextUsers = [...existingUsers];
+
+  for (const seed of allSeeds) {
+    const emailKey = seed.email.toLowerCase();
+    if (!existingByEmail.has(emailKey)) {
+      const passwordHash = await hashPassword(seed.password);
+      nextUsers.push(
+        normalizeUserPermissions({
+          id: seed.id,
+          accountType: seed.accountType,
+          name: seed.name,
+          email: seed.email,
+          company: seed.company,
+          role: seed.role,
+          passwordHash,
+          approved: seed.approved,
+          createdAt: "2026-11-17T09:00:00.000Z",
+          allowedVerticals: seed.allowedVerticals,
+          allowedLocations: seed.allowedLocations,
+          userPermissions: seed.userPermissions,
+          inventoryPermissions: seed.inventoryPermissions,
+          menuPermissions: seed.menuPermissions,
+          modulePermissions: seed.modulePermissions,
+        }),
+      );
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    saveUsers(nextUsers);
+  }
+  return nextUsers.map((u) => normalizeUserPermissions(u));
 }

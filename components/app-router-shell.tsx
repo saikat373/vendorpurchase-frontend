@@ -24,7 +24,7 @@ function AppRouteTable() {
       {/* Root & Auth Routes */}
       <Route path="/" element={<Navigate to={APP_ROUTES.LOGIN} replace />} />
       <Route path={APP_ROUTES.LOGIN} element={<AuthPage mode="login" />} />
-      <Route path={APP_ROUTES.SIGNUP} element={<AuthPage mode="signup" />} />
+      <Route path={APP_ROUTES.SIGNUP} element={<Navigate to={APP_ROUTES.LOGIN} replace />} />
 
       {/* Direct /inventory/* convenience routes redirecting to /dashboard/inventory/* */}
       <Route
