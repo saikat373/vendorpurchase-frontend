@@ -1,0 +1,304 @@
+
+# Project Requirement: Inventory Management Module
+
+## 1. Project Overview
+
+Develop a scalable, modular Inventory Management Module for a web application.
+
+The Inventory module must support three independent inventory categories:
+
+1. Kirana / Grocery
+2. Pharmacy
+3. Mall / Supermarket
+
+All three categories must use a common inventory management architecture while supporting category-specific product attributes and business rules.
+
+The application must be modular, scalable, secure and suitable for future desktop application integration.
+
+
+### Export
+- Excel export
+- PDF export
+- Server-side report generation
+
+## 3. Main Navigation
+
+Create a separate Inventory menu in the application sidebar.
+
+Inventory
+- Add Inventory
+- Inventory List
+  - Kirana
+  - Pharmacy
+  - Mall
+- Stock History
+- Stock Adjustment
+- Inventory Reports
+
+Display menu items according to the logged-in user's permissions.
+
+## 4. Add Inventory
+
+Create a dedicated Add Inventory page.
+
+The user must select an inventory category before entering product information.
+
+Only categories authorized for the logged-in user should be displayed.
+
+### Common Product Fields
+- Product Name
+- SKU
+- Barcode
+- Brand
+- Product Category
+- Description
+- Product Image
+- Supplier
+- Purchase Price
+- Selling Price
+- Tax Information
+- Unit of Measurement
+- Initial Stock Quantity
+- Minimum Stock Level
+- Maximum Stock Level
+- Status (Active/Inactive)
+
+### Kirana-Specific Fields
+- Grocery Subcategory
+- Brand
+- Unit Type
+- Weight/Volume
+- MRP
+- Manufacturing Date (where applicable)
+- Expiry Date (where applicable)
+- Storage Information
+
+### Pharmacy-Specific Fields
+- Medicine Name
+- Generic Name
+- Composition
+- Manufacturer
+- Batch Number
+- Manufacturing Date
+- Expiry Date
+- Schedule/Drug Classification
+- Prescription Requirement
+- Applicable Licence Information
+- MRP
+- Purchase Price
+- Selling Price
+
+Pharmacy inventory must support multiple batches for the same medicine. Track quantity, expiry date and purchase price separately for every batch.
+
+### Mall-Specific Fields
+- Department
+- Product Brand
+- Product Model
+- Product Variant
+- Size
+- Colour
+- Barcode
+- MRP
+- Purchase Price
+- Selling Price
+- Warehouse/Store Location
+
+### Validation
+- SKU must be unique within the applicable inventory scope.
+- Validate barcode uniqueness.
+- Validate mandatory fields.
+- Selling price and purchase price must be valid monetary values.
+- Stock quantity cannot be negative.
+- Validate batch expiry dates.
+- Validate category-specific fields.
+- Prevent unauthorized category creation through backend authorization.
+
+## 5. Inventory Listing
+
+Create three independent listing pages:
+
+- Kirana Inventory List
+- Pharmacy Inventory List
+- Mall Inventory List
+
+Each listing page must support:
+
+### Search
+- Dynamic search.
+- Search by product name.
+- Search by SKU.
+- Search by barcode.
+- Search by brand.
+- Debounced search.
+- No full page reload.
+
+### Filters
+- Product category.
+- Brand.
+- Supplier.
+- Active/Inactive status.
+- Stock status.
+- Date range.
+- Expiry status for Pharmacy.
+
+### Table Features
+- Server-side pagination.
+- Configurable page size.
+- Sorting by columns.
+- Total record count.
+- Responsive layout.
+- Loading skeleton.
+- Empty state.
+- Error state.
+
+### Export
+- Export to Excel.
+- Export to PDF.
+- Export currently filtered records.
+- Export all authorized records when explicitly requested.
+- Include relevant product and stock information.
+- Respect user permissions when exporting.
+
+### Action Column
+Provide:
+- View Inventory
+- Edit Inventory
+- Stock History
+
+Do not provide any delete action.
+
+Inventory records must never be physically deleted through the interface.
+
+Use Active/Inactive status for record management.
+
+## 6. Stock Management
+
+Implement a separate stock management service.
+
+Support:
+- Initial stock entry.
+- Stock addition.
+- Stock reduction.
+- Stock correction.
+- Stock transfer between locations.
+- Stock adjustment with mandatory reason.
+- Batch-wise stock management.
+- Minimum stock alerts.
+- Out-of-stock alerts.
+- Expiry alerts.
+
+Every stock modification must create a stock transaction.
+
+Maintain:
+- Previous quantity.
+- Quantity added or deducted.
+- New quantity.
+- Transaction type.
+- Transaction reason.
+- Reference number.
+- User who performed the operation.
+- Transaction date and time.
+
+Never update stock quantities without generating the corresponding stock transaction.
+
+Use database transactions and appropriate row-level locking to prevent race conditions.
+
+## 7. Permissions and Security
+
+Implement Role-Based Access Control (RBAC).
+
+Permissions must be configurable for:
+- View Inventory.
+- Add Inventory.
+- Edit Inventory.
+- View Stock.
+- Adjust Stock.
+- Export Inventory.
+- View Stock History.
+- View Reports.
+
+Permissions must support category-level and store/location-level restrictions.
+
+Both frontend and backend must enforce authorization.
+
+Hiding a menu or button is not sufficient authorization.
+
+All API endpoints must validate the authenticated user's permissions.
+
+## 8. Audit History
+
+Maintain audit logs for:
+- Inventory creation.
+- Inventory modification.
+- Stock adjustment.
+- Supplier changes.
+- Price changes.
+- Status changes.
+- Batch modifications.
+
+Audit logs must include the user, timestamp, operation, affected record and relevant before/after values.
+
+Audit records must not be editable or deletable by ordinary users.
+
+## 9. Dashboard
+
+Create an Inventory Dashboard containing:
+
+- Total Products.
+- Total Active Products.
+- Total Inventory Categories.
+- Total Stock Quantity.
+- Low Stock Products.
+- Out-of-Stock Products.
+- Expiring Products.
+- Total Inventory Purchase Value.
+- Category-wise inventory summary.
+- Recent inventory activities.
+
+Dashboard information must respect user permissions and assigned inventory locations.
+
+## 12. UI/UX Requirements
+
+Design a professional, modern inventory management interface.
+
+The design must support:
+- Light mode.
+- Dark mode.
+- Responsive desktop and tablet layouts.
+- Sidebar navigation.
+- Breadcrumb navigation.
+- Dashboard cards.
+- Modern data tables.
+- Dynamic filter panels.
+- Search functionality.
+- Confirmation dialogs.
+- Toast notifications.
+- Loading states.
+- Empty states.
+- Error handling.
+
+Use reusable components and consistent design tokens.
+
+## 13. Important Business Rules
+
+1. Kirana, Pharmacy and Mall must remain separate inventory categories.
+2. Common product functionality must be reusable.
+3. Users can only access categories and records permitted by their permissions.
+4. Inventory cannot be deleted.
+5. Inactive inventory must remain available in historical records.
+6. Stock changes must always be recorded in stock transactions.
+7. Pharmacy must support batch-wise stock and expiry management.
+8. Excel and PDF exports must respect filters and permissions.
+9. All list pages must support server-side pagination.
+10. Every inventory modification must be auditable.
+
+
+Do not unnecessarily rewrite existing application modules.
+
+
+
+
+
+login
+username - demo@vendor.test
+password - VendorDemo26!
