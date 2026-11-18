@@ -19,6 +19,7 @@ import {
   type ModulePermissionKey,
   type VendorVerticalPermission,
 } from "@/lib/auth-storage";
+import { apiFetch, clearAuthToken, getAuthToken } from "@/lib/api-client";
 import { InventoryModule } from "@/components/inventory-module";
 import { TablePagination, paginateSlice } from "@/components/table-pagination";
 import { UserPermissionModule } from "@/components/user-permission-module";
@@ -357,33 +358,44 @@ export function DashboardPage() {
   useEffect(() => {
     void (async () => {
       try {
+        const token = getAuthToken();
         const session = readSession();
-        if (!session) {
-          navigate(APP_ROUTES.LOGIN, { replace: true });
-          return;
-        }
-        let storedUsers = await ensureSeededCredentialUsers();
-        // Ensure seeded staff accounts exist so the User Module has Pharmacy & Supermarket profiles
-        const existingIds = new Set(storedUsers.map((u) => u.id));
-        const missingSeeds = SEED_STAFF_USERS.filter((s) => !existingIds.has(s.id));
-        if (missingSeeds.length > 0) {
-          storedUsers = [
-            ...storedUsers,
-            ...missingSeeds.map((s) => normalizeUserPermissions({ ...s, accountType: "Vendor" })),
-          ];
-          saveUsers(storedUsers);
-        }
-
-        const current = storedUsers.find((item) => item.id === session.id);
-        if (!current?.approved || current.isActive === false) {
+        if (!token || !session) {
+          clearAuthToken();
           clearSession();
           navigate(APP_ROUTES.LOGIN, { replace: true });
           return;
         }
-        const normalizedCurrent = normalizeUserPermissions(current);
+
+        const meRes = await apiFetch("/api/auth/me");
+        if (!meRes.ok) {
+          clearAuthToken();
+          clearSession();
+          navigate(APP_ROUTES.LOGIN, { replace: true });
+          return;
+        }
+        const meData = (await meRes.json()) as { user: AdminUser };
+        const normalizedCurrent = normalizeUserPermissions({
+          ...meData.user,
+          passwordHash: "",
+        });
+        saveSession(normalizedCurrent);
         setUser(normalizedCurrent);
-        setAllUsers(storedUsers);
-        setPendingUsers(storedUsers.filter((item) => !item.approved));
+
+        if (normalizedCurrent.accountType === "Admin") {
+          const vendorsRes = await apiFetch("/api/admin/vendors?limit=100");
+          if (vendorsRes.ok) {
+            const vendorsData = (await vendorsRes.json()) as { items: AdminUser[] };
+            const normalizedList = vendorsData.items.map((u) =>
+              normalizeUserPermissions({ ...u, passwordHash: "" }),
+            );
+            setAllUsers(normalizedList);
+            setPendingUsers(normalizedList.filter((item) => !item.approved));
+          }
+        } else {
+          setAllUsers([normalizedCurrent]);
+          setPendingUsers([]);
+        }
 
         // Sync initial vertical scope to user's permitted verticals
         if (normalizedCurrent.allowedVerticals.length === 1) {
@@ -456,12 +468,34 @@ export function DashboardPage() {
     setNewSupplierPhone(cfg.defaultSupplierPhone);
   }
 
-  function handleUpdateUserPermissions(updatedTarget: AdminUser) {
+  async function handleUpdateUserPermissions(updatedTarget: AdminUser) {
+    const previous = allUsers.find((u) => u.id === updatedTarget.id);
     const normalized = normalizeUserPermissions(updatedTarget);
     const nextUsers = allUsers.map((u) => (u.id === normalized.id ? normalized : u));
-    saveUsers(nextUsers);
     setAllUsers(nextUsers);
     setPendingUsers(nextUsers.filter((u) => !u.approved));
+
+    try {
+      if (previous && previous.isActive !== normalized.isActive) {
+        await apiFetch(`/api/admin/vendors/${normalized.id}/status`, {
+          method: "PATCH",
+          body: JSON.stringify({ isActive: normalized.isActive !== false }),
+        });
+      }
+      await apiFetch(`/api/admin/vendors/${normalized.id}/permissions`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          allowedVerticals: normalized.allowedVerticals,
+          allowedLocations: normalized.allowedLocations,
+          userPermissions: normalized.userPermissions,
+          inventoryPermissions: normalized.inventoryPermissions,
+          menuPermissions: normalized.menuPermissions,
+          modulePermissions: normalized.modulePermissions,
+        }),
+      });
+    } catch {
+      notify("Failed to sync vendor permissions with backend.");
+    }
 
     if (user && normalized.id === user.id) {
       saveSession(normalized);
@@ -482,15 +516,41 @@ export function DashboardPage() {
     }
   }
 
-  function handleCreateVendor(newVendor: AdminUser) {
-    const normalized = normalizeUserPermissions({
-      ...newVendor,
-      accountType: "Vendor",
-    });
-    const nextUsers = [normalized, ...allUsers];
-    saveUsers(nextUsers);
-    setAllUsers(nextUsers);
-    setPendingUsers(nextUsers.filter((u) => !u.approved));
+  async function handleCreateVendor(newVendor: AdminUser & { rawPassword?: string }) {
+    try {
+      const res = await apiFetch("/api/admin/vendors", {
+        method: "POST",
+        body: JSON.stringify({
+          name: newVendor.name,
+          email: newVendor.email,
+          password: newVendor.rawPassword || "Vendor@123",
+          company: newVendor.company,
+          role: newVendor.role || "Vendor",
+          isActive: newVendor.isActive !== false,
+          approved: true,
+          allowedVerticals: newVendor.allowedVerticals ?? ["Grocery"],
+          allowedLocations: newVendor.allowedLocations ?? ["Main Store — Ground Floor"],
+          userPermissions: newVendor.userPermissions ?? {},
+          inventoryPermissions: newVendor.inventoryPermissions ?? {},
+          menuPermissions: newVendor.menuPermissions ?? [],
+          modulePermissions: newVendor.modulePermissions ?? [],
+        }),
+      });
+      const data = (await res.json()) as { vendor?: AdminUser; error?: string };
+      if (!res.ok || !data.vendor) {
+        notify(data.error || "Failed to create vendor in backend.");
+        return;
+      }
+      const normalized = normalizeUserPermissions({
+        ...data.vendor,
+        passwordHash: "",
+      });
+      const nextUsers = [normalized, ...allUsers];
+      setAllUsers(nextUsers);
+      setPendingUsers(nextUsers.filter((u) => !u.approved));
+    } catch {
+      notify("Failed to create vendor in backend.");
+    }
   }
 
   function updateInventoryAndPersist(updater: (prev: LooseInventoryItem[]) => LooseInventoryItem[]) {
@@ -676,6 +736,7 @@ export function DashboardPage() {
   }
 
   function signOut() {
+    clearAuthToken();
     clearSession();
     navigate(APP_ROUTES.LOGIN, { replace: true });
   }

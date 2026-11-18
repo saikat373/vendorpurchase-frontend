@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { NavLink } from "react-router-dom";
+import { apiFetch } from "@/lib/api-client";
 import type { AdminUser } from "@/lib/auth-storage";
 import { ALL_LOCATIONS, DEFAULT_INVENTORY_PERMISSIONS } from "@/lib/auth-storage";
 import { TablePagination } from "@/components/table-pagination";
@@ -367,11 +368,8 @@ export function InventoryModule({
     setDashboardLoading(true);
     setDashboardError("");
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/inventory/reports?mode=dashboard&category=${dashboardCategoryFilter}`,
-        {
-          headers: { "x-user-context": userContextHeader },
-        },
       );
       const data = await res.json();
       if (!res.ok) {
@@ -416,9 +414,7 @@ export function InventoryModule({
         pageSize: String(listPagination.pageSize),
       });
 
-      const res = await fetch(`/api/inventory?${params.toString()}`, {
-        headers: { "x-user-context": userContextHeader },
-      });
+      const res = await apiFetch(`/api/inventory?${params.toString()}`);
       const data = await res.json();
       if (!res.ok) {
         throw new Error(data.error || "Failed to load inventory records.");
@@ -469,9 +465,7 @@ export function InventoryModule({
         params.set("productId", txnProductIdFilter);
       }
 
-      const res = await fetch(`/api/inventory/stock?${params.toString()}`, {
-        headers: { "x-user-context": userContextHeader },
-      });
+      const res = await apiFetch(`/api/inventory/stock?${params.toString()}`);
       const data = await res.json();
       if (res.ok) {
         setStockTxns(data.items || []);
@@ -497,9 +491,7 @@ export function InventoryModule({
   const fetchAuthorizedProductsForAdjustment = useCallback(async () => {
     if (!invPerms.viewInventory) return;
     try {
-      const res = await fetch(`/api/inventory?category=ALL&pageSize=200`, {
-        headers: { "x-user-context": userContextHeader },
-      });
+      const res = await apiFetch(`/api/inventory?category=ALL&pageSize=200`);
       const data = await res.json();
       if (res.ok && Array.isArray(data.items)) {
         setAllAuthorizedProducts(data.items);
@@ -522,9 +514,7 @@ export function InventoryModule({
         page: String(auditPagination.page),
         pageSize: String(auditPagination.pageSize),
       });
-      const res = await fetch(`/api/inventory/reports?${params.toString()}`, {
-        headers: { "x-user-context": userContextHeader },
-      });
+      const res = await apiFetch(`/api/inventory/reports?${params.toString()}`);
       const data = await res.json();
       if (res.ok) {
         setAuditLogs(data.items || []);
@@ -753,12 +743,8 @@ export function InventoryModule({
 
     setAddSubmitting(true);
     try {
-      const res = await fetch("/api/inventory", {
+      const res = await apiFetch("/api/inventory", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-user-context": userContextHeader,
-        },
         body: JSON.stringify(payload),
       });
       const data = await res.json();
@@ -835,9 +821,7 @@ export function InventoryModule({
         sortOrder,
       });
 
-      const res = await fetch(`/api/inventory/export?${params.toString()}`, {
-        headers: { "x-user-context": userContextHeader },
-      });
+      const res = await apiFetch(`/api/inventory/export?${params.toString()}`);
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
@@ -876,9 +860,7 @@ export function InventoryModule({
     setViewingProduct(product);
     setViewModalLoading(true);
     try {
-      const res = await fetch(`/api/inventory/${product.id}`, {
-        headers: { "x-user-context": userContextHeader },
-      });
+      const res = await apiFetch(`/api/inventory/${product.id}`);
       const data = await res.json();
       if (res.ok) {
         setViewingProduct(data.product);
@@ -905,12 +887,8 @@ export function InventoryModule({
     setEditSaving(true);
     setEditErrors([]);
     try {
-      const res = await fetch(`/api/inventory/${editingProduct.id}`, {
+      const res = await apiFetch(`/api/inventory/${editingProduct.id}`, {
         method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          "x-user-context": userContextHeader,
-        },
         body: JSON.stringify(editingProduct),
       });
       const data = await res.json();
@@ -950,12 +928,8 @@ export function InventoryModule({
       danger: nextStatus === "Inactive",
       onConfirm: async () => {
         setConfirmDialog(null);
-        const res = await fetch(`/api/inventory/${product.id}`, {
+        const res = await apiFetch(`/api/inventory/${product.id}`, {
           method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-            "x-user-context": userContextHeader,
-          },
           body: JSON.stringify({ status: nextStatus }),
         });
         if (res.ok) {
@@ -1005,12 +979,8 @@ export function InventoryModule({
         setConfirmDialog(null);
         setAdjSubmitting(true);
         try {
-          const res = await fetch("/api/inventory/stock", {
+          const res = await apiFetch("/api/inventory/stock", {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "x-user-context": userContextHeader,
-            },
             body: JSON.stringify({
               productId: selectedAdjProduct.id,
               transactionType: adjType,

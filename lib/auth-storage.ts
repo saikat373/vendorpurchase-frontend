@@ -183,27 +183,75 @@ export function normalizeUserPermissions(user: AdminUser): Required<
 
   const isAdmin = accountType === "Admin";
 
-  const baseMenus = user.menuPermissions
-    ? [...user.menuPermissions]
-    : isAdmin
-      ? [...ALL_MENU_KEYS]
-      : [...VENDOR_DEFAULT_MENU_KEYS];
+  const toKeyArray = <T extends string>(
+    val: unknown,
+    validKeys: readonly T[],
+    fallback: T[],
+  ): T[] => {
+    const validSet = new Set<string>(validKeys);
+    if (Array.isArray(val)) {
+      const filtered = val.filter((k): k is T => typeof k === "string" && validSet.has(k));
+      return filtered.length > 0 ? filtered : [...fallback];
+    }
+    if (val && typeof val === "object") {
+      const keys = Object.entries(val as Record<string, unknown>)
+        .filter(([k, enabled]) => Boolean(enabled) && validSet.has(k))
+        .map(([k]) => k as T);
+      return keys.length > 0 ? keys : [...fallback];
+    }
+    return [...fallback];
+  };
+
+  const baseMenus = isAdmin
+    ? [...ALL_MENU_KEYS]
+    : toKeyArray<MenuPermissionKey>(
+        user.menuPermissions,
+        ALL_MENU_KEYS,
+        VENDOR_DEFAULT_MENU_KEYS,
+      );
 
   // Ensure users who had inventory-hub also get the Inventory menu unless explicitly configured
   if (!baseMenus.includes("inventory") && baseMenus.includes("inventory-hub")) {
     baseMenus.push("inventory");
   }
 
-  const userPerms: UserActionPermissions = user.userPermissions
-    ? { ...user.userPermissions }
-    : isAdmin
-      ? { ...DEFAULT_USER_PERMISSIONS }
+  const userPerms: UserActionPermissions = isAdmin
+    ? { ...DEFAULT_USER_PERMISSIONS }
+    : user.userPermissions
+      ? {
+          ...VENDOR_DEFAULT_USER_PERMISSIONS,
+          ...user.userPermissions,
+        }
       : { ...VENDOR_DEFAULT_USER_PERMISSIONS };
 
-  const invPerms: InventoryRBACPermissions = user.inventoryPermissions
-    ? { ...user.inventoryPermissions }
-    : isAdmin
-      ? { ...DEFAULT_INVENTORY_PERMISSIONS }
+  const rawInv = (user.inventoryPermissions ?? {}) as Record<string, boolean>;
+  const invPerms: InventoryRBACPermissions = isAdmin
+    ? { ...DEFAULT_INVENTORY_PERMISSIONS }
+    : user.inventoryPermissions
+      ? {
+          ...VENDOR_DEFAULT_INVENTORY_PERMISSIONS,
+          ...user.inventoryPermissions,
+          ...(typeof rawInv.view === "boolean" && rawInv.viewInventory === undefined
+            ? {
+                viewInventory: rawInv.view,
+                viewStock: rawInv.view,
+                viewStockHistory: rawInv.view,
+                viewReports: rawInv.view,
+              }
+            : {}),
+          ...(typeof rawInv.create === "boolean" && rawInv.addInventory === undefined
+            ? { addInventory: rawInv.create }
+            : {}),
+          ...(typeof rawInv.edit === "boolean" && rawInv.editInventory === undefined
+            ? { editInventory: rawInv.edit }
+            : {}),
+          ...(typeof rawInv.stockAdjust === "boolean" && rawInv.adjustStock === undefined
+            ? { adjustStock: rawInv.stockAdjust }
+            : {}),
+          ...(typeof rawInv.export === "boolean" && rawInv.exportInventory === undefined
+            ? { exportInventory: rawInv.export }
+            : {}),
+        }
       : {
           ...VENDOR_DEFAULT_INVENTORY_PERMISSIONS,
           addInventory: userPerms.canAddInventory,
@@ -213,26 +261,26 @@ export function normalizeUserPermissions(user: AdminUser): Required<
     ...user,
     accountType,
     isActive: user.isActive ?? true,
-    allowedVerticals:
-      user.allowedVerticals && user.allowedVerticals.length > 0
+    allowedVerticals: isAdmin
+      ? [...ALL_VERTICALS]
+      : user.allowedVerticals && user.allowedVerticals.length > 0
         ? user.allowedVerticals
-        : isAdmin
-          ? [...ALL_VERTICALS]
-          : ["Grocery"],
-    allowedLocations:
-      user.allowedLocations && user.allowedLocations.length > 0
+        : ["Grocery"],
+    allowedLocations: isAdmin
+      ? ["ALL"]
+      : user.allowedLocations && user.allowedLocations.length > 0
         ? user.allowedLocations
-        : isAdmin
-          ? ["ALL"]
-          : ["Main Store — Ground Floor"],
+        : ["Main Store — Ground Floor"],
     userPermissions: userPerms,
     inventoryPermissions: invPerms,
     menuPermissions: baseMenus,
-    modulePermissions: user.modulePermissions
-      ? [...user.modulePermissions]
-      : isAdmin
-        ? [...ALL_MODULE_KEYS]
-        : [...VENDOR_DEFAULT_MODULE_KEYS],
+    modulePermissions: isAdmin
+      ? [...ALL_MODULE_KEYS]
+      : toKeyArray<ModulePermissionKey>(
+          user.modulePermissions,
+          ALL_MODULE_KEYS,
+          VENDOR_DEFAULT_MODULE_KEYS,
+        ),
   };
 }
 

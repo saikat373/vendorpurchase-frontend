@@ -3,8 +3,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
-  DUMMY_ADMIN_CREDENTIALS,
-  DUMMY_VENDOR_CREDENTIALS,
   VENDOR_DEFAULT_INVENTORY_PERMISSIONS,
   VENDOR_DEFAULT_MENU_KEYS,
   VENDOR_DEFAULT_MODULE_KEYS,
@@ -17,6 +15,7 @@ import {
   type AdminUser,
   type UserAccountType,
 } from "@/lib/auth-storage";
+import { apiFetch, setAuthToken } from "@/lib/api-client";
 import { APP_ROUTES, MENU_KEY_TO_PATH } from "@/lib/routes";
 
 type AuthPageProps = {
@@ -132,21 +131,8 @@ export function AuthPage({ mode }: AuthPageProps) {
   useEffect(() => {
     queueMicrotask(() => {
       setCaptcha(makeCaptcha());
-      void ensureSeededCredentialUsers();
     });
   }, []);
-
-  function fillDummyCredential(email: string, password: string, type: UserAccountType) {
-    setAccountType(type);
-    setValues((current) => ({
-      ...current,
-      email,
-      password,
-    }));
-    setCaptchaAnswer(String(captcha.answer));
-    setIsError(false);
-    setStatus(`Filled ${type} test credentials (${email}). Click "Sign in to dashboard" to continue.`);
-  }
 
   function update(field: keyof typeof values, value: string) {
     setValues((current) => ({ ...current, [field]: value }));
@@ -236,12 +222,11 @@ export function AuthPage({ mode }: AuthPageProps) {
 
     setIsSubmitting(true);
     try {
-      const users = await ensureSeededCredentialUsers();
-      let existing = users.find(
-        (user) => user.email.toLowerCase() === values.email.trim().toLowerCase(),
-      );
-
       if (isSignup) {
+        const users = await ensureSeededCredentialUsers();
+        const existing = users.find(
+          (user) => user.email.toLowerCase() === values.email.trim().toLowerCase(),
+        );
         if (existing) {
           setIsError(true);
           setStatus(
@@ -298,56 +283,35 @@ export function AuthPage({ mode }: AuthPageProps) {
         return;
       }
 
-      const passwordHash = await hashPassword(values.password);
-      if (
-        !existing &&
-        values.email.trim().toLowerCase() === DEMO_EMAIL &&
-        values.password === DEMO_PASSWORD
-      ) {
-        existing = {
-          id: "vendorpurchase-demo-admin",
-          accountType: "Admin",
-          name: "Demo Admin",
-          email: DEMO_EMAIL,
-          company: "VendorPurchase Demo",
-          role: "Operations Admin",
-          passwordHash,
-          approved: true,
-          createdAt: new Date().toISOString(),
-        };
-        saveUsers([...users, existing]);
-      }
+      const loginRes = await apiFetch("/api/auth/login", {
+        method: "POST",
+        skipAuthRedirect: true,
+        body: JSON.stringify({
+          email: values.email.trim(),
+          password: values.password,
+          accountType,
+        }),
+      });
+      const loginData = (await loginRes.json()) as {
+        token?: string;
+        user?: AdminUser;
+        error?: string;
+      };
 
-      if (!existing || existing.passwordHash !== passwordHash) {
+      if (!loginRes.ok || !loginData.token || !loginData.user) {
         setIsError(true);
-        setStatus("The email or password you entered is incorrect.");
+        setStatus(loginData.error || "The email or password you entered is incorrect.");
         setCaptcha(makeCaptcha());
         setCaptchaAnswer("");
         return;
       }
-      if (!existing.approved) {
-        setIsError(true);
-        setStatus("Your account is awaiting administrator approval.");
-        return;
-      }
-      if (existing.isActive === false) {
-        setIsError(true);
-        setStatus(
-          "Your account is currently inactive. Please contact an Administrator to activate your account.",
-        );
-        return;
-      }
 
-      const resolvedType: UserAccountType = existing.accountType ?? "Admin";
-      if (resolvedType !== accountType) {
-        setIsError(true);
-        setStatus(
-          `This account is registered as a ${resolvedType}. Please switch to "${resolvedType} Login" above.`,
-        );
-        return;
-      }
-
-      saveSession(existing);
+      setAuthToken(loginData.token);
+      const loggedInUser: AdminUser = {
+        ...loginData.user,
+        passwordHash: "",
+      };
+      saveSession(loggedInUser);
       setValues({
         name: "",
         email: "",
@@ -359,17 +323,25 @@ export function AuthPage({ mode }: AuthPageProps) {
       setCaptchaAnswer("");
       setCaptcha(makeCaptcha());
 
-      const permittedMenus = existing.menuPermissions ?? [];
+      const permittedMenus = Array.isArray(loggedInUser.menuPermissions)
+        ? loggedInUser.menuPermissions
+        : [];
+      const firstValidMenu = permittedMenus.find((key) => key in MENU_KEY_TO_PATH);
       if (permittedMenus.includes("inventory")) {
         navigate(APP_ROUTES.INVENTORY_DASHBOARD);
-      } else if (permittedMenus.length > 0) {
-        navigate(MENU_KEY_TO_PATH[permittedMenus[0]]);
+      } else if (firstValidMenu) {
+        navigate(MENU_KEY_TO_PATH[firstValidMenu]);
       } else {
         navigate(APP_ROUTES.OVERVIEW);
       }
-    } catch {
+    } catch (err) {
+      console.error("Auth error:", err);
       setIsError(true);
-      setStatus("We couldn’t complete that request. Please try again.");
+      setStatus(
+        err instanceof Error && err.message
+          ? `Request failed: ${err.message}`
+          : "We couldn’t complete that request. Please try again.",
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -687,40 +659,8 @@ export function AuthPage({ mode }: AuthPageProps) {
                 <p className="auth-privacy">
                   {accountType === "Vendor"
                     ? "Vendor accounts are created & activated by an Administrator."
-                    : <>Demo Admin: <strong>{DEMO_EMAIL}</strong> / <strong>{DEMO_PASSWORD}</strong></>}
+                    : "Sign in with your administrator credentials."}
                 </p>
-
-                {!isSignup && (
-                  <div className="dummy-creds-box" aria-label="Dummy test credentials from JSON">
-                    <div className="dummy-creds-header">
-                      <span>Test Credentials (data/dummy-credentials.json)</span>
-                      <small>Click to auto-fill</small>
-                    </div>
-                    <div className="dummy-creds-list">
-                      {(accountType === "Admin"
-                        ? DUMMY_ADMIN_CREDENTIALS
-                        : DUMMY_VENDOR_CREDENTIALS
-                      ).map((cred) => (
-                        <button
-                          key={cred.id}
-                          type="button"
-                          className="dummy-cred-chip"
-                          onClick={() =>
-                            fillDummyCredential(cred.email, cred.password, cred.accountType)
-                          }
-                        >
-                          <div>
-                            <strong>{cred.name}</strong>
-                            <small>
-                              {cred.email} · <code>{cred.password}</code>
-                            </small>
-                          </div>
-                          <span>Fill →</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
               </>
             )}
           </div>

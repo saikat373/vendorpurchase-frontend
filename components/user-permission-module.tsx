@@ -23,7 +23,7 @@ type UserPermissionModuleProps = {
   currentUser: AdminUser;
   allUsers: AdminUser[];
   onUpdateUser: (updated: AdminUser) => void;
-  onCreateVendor: (newVendor: AdminUser) => void;
+  onCreateVendor: (newVendor: AdminUser & { rawPassword?: string }) => void;
   onApproveUser: (email: string) => void;
   onNotify: (msg: string) => void;
 };
@@ -343,7 +343,7 @@ export function UserPermissionModule({
         menuPermissions: [...VENDOR_DEFAULT_MENU_KEYS],
         modulePermissions: [...VENDOR_DEFAULT_MODULE_KEYS],
       };
-      onCreateVendor(newVendor);
+      onCreateVendor({ ...newVendor, rawPassword: vendorPassword });
       setCreateVendorOpen(false);
       setVendorName("");
       setVendorEmail("");
